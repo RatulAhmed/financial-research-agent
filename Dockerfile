@@ -5,11 +5,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# Pre-download the embedding model during build so it's baked into the image
+# Pre-download the embedding model during build
 RUN python -c "from chromadb.utils import embedding_functions; embedding_functions.DefaultEmbeddingFunction()"
 
 COPY . .
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app.py", "--server.port $PORT" , "--server.address", "0.0.0.0"]
+CMD streamlit run app.py --server.port $PORT --server.address 0.0.0.0
