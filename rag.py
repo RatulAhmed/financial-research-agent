@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 import anthropic
 import chromadb
+from chromadb.utils import embedding_functions
 from pypdf import PdfReader
 import hashlib
 
@@ -58,22 +59,11 @@ def get_pdf_hash(path):
 
 # ---- STEP 3: Build/load persistent vector store ----
 def build_vector_store(pdf_paths):
-    chroma = chromadb.PersistentClient(path=".chromadb")
+    chroma = chromadb.Client()  # in-memory, no disk writes
     collection = chroma.get_or_create_collection("rag_demo")
-    
-    # Track which PDFs have already been ingested
-    ingested = chroma.get_or_create_collection("ingested_pdfs")
 
     for path in pdf_paths:
         filename = os.path.basename(path)
-        pdf_hash = get_pdf_hash(path)
-
-        # Check if this exact PDF has been ingested before
-        existing = ingested.get(ids=[pdf_hash])
-        if existing["ids"]:
-            print(f"Skipping {filename} (already ingested)")
-            continue
-
         print(f"Ingesting {filename}...")
         chunks = load_pdf(path)
         collection.add(
@@ -81,9 +71,7 @@ def build_vector_store(pdf_paths):
             ids=[c["id"] for c in chunks],
             metadatas=[c["metadata"] for c in chunks]
         )
-        # Mark this PDF as ingested
-        ingested.add(documents=[filename], ids=[pdf_hash])
-        print(f"  → {len(chunks)} pages ingested")
+        print(f"  → {len(chunks)} chunks ingested")
 
     print(f"\nVector store ready ({collection.count()} total chunks)\n")
     return collection
@@ -127,12 +115,6 @@ Context:
 {context_text}
 
 Question: {question}"""
-
-    if debug:
-        print("\n========== PAYLOAD SENT TO CLAUDE ==========")
-        print(f"SYSTEM: {SYSTEM_PROMPT}\n")
-        print(f"USER: {prompt}")
-        print("=============================================\n")
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
