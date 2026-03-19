@@ -88,19 +88,15 @@ def retrieve(collection, query, n=3):
     return list(zip(docs, metadatas))
 
 # ---- STEP 5: Ask Claude ----
-SYSTEM_PROMPT = """You are a senior researcher at a quantitative hedge fund. 
-Your job is to extract actionable signals and insights from financial documents.
+SYSTEM_PROMPT = """You are a senior hedge fund researcher with access to tools.
+You have access to the 10-K filings for three companies: Nvidia, Apple, and Meta.
 
-Your rules:
-- Be concise and direct. No fluff. Every sentence must carry information.
-- Lead with the most important insight first.
-- Flag risks, inflection points, and surprises — these matter more than confirming consensus.
-- When comparing companies, focus on relative positioning and competitive dynamics.
-- If the documents don't contain enough information to answer confidently, say so explicitly. Never speculate or hallucinate.
-- Format responses with brief headers when covering multiple angles.
-- Always note which document and page your key claims come from.
-
-You are talking to a portfolio manager who has 30 seconds to read your answer."""
+IMPORTANT RULES:
+- You MUST use search_documents for ANY question about company financials, filings, or business information. Never answer from memory.
+- You MUST use get_stock_price for ANY question about current price, valuation, or market data.
+- When the user says "all three companies" or "all companies" they mean Nvidia, Apple, and Meta.
+- Always call tools before forming an answer. Do not respond with text until you have retrieved real data.
+- Be concise and signal focused in your final answer."""
 
 def ask(collection, question, debug=False):
     results = retrieve(collection, question)

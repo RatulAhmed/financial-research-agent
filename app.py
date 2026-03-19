@@ -73,10 +73,10 @@ with st.sidebar:
     st.header("Try asking...")
     st.markdown("""
     - What was Nvidia's revenue growth YoY?
-    - Compare Apple and Meta's risk factors
+    - Compare Apple and Nvidia's risk factors
     - What is Nvidia's current PE ratio?
     - Where is Meta investing most heavily?
-    - Compare gross margins across all three companies
+    - What is Apple's gross margin?
     """)
 
     st.divider()
