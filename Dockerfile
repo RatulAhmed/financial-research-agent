@@ -5,10 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY preload.py .
-RUN python preload.py
-
 COPY . .
+
+RUN python preload.py
 
 EXPOSE 8501
 

@@ -61,7 +61,7 @@ if "app" not in st.session_state:
     st.session_state.app = build_graph()
 if "collection" not in st.session_state:
     with st.spinner("Loading knowledge base..."):
-        st.session_state.collection = build_vector_store(PDF_PATHS)
+        st.session_state.collection = build_vector_store([])
 
 # ---- SIDEBAR ----
 with st.sidebar:

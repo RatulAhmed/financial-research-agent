@@ -59,21 +59,25 @@ def get_pdf_hash(path):
 
 # ---- STEP 3: Build/load persistent vector store ----
 def build_vector_store(pdf_paths):
-    chroma = chromadb.Client()  # in-memory, no disk writes
+    chroma = chromadb.PersistentClient(path=".chromadb")
     collection = chroma.get_or_create_collection("rag_demo")
 
-    for path in pdf_paths:
-        filename = os.path.basename(path)
-        print(f"Ingesting {filename}...")
-        chunks = load_pdf(path)
-        collection.add(
-            documents=[c["text"] for c in chunks],
-            ids=[c["id"] for c in chunks],
-            metadatas=[c["metadata"] for c in chunks]
-        )
-        print(f"  → {len(chunks)} chunks ingested")
+    # Only ingest if empty
+    if collection.count() == 0:
+        for path in pdf_paths:
+            filename = os.path.basename(path)
+            print(f"Ingesting {filename}...")
+            chunks = load_pdf(path)
+            collection.add(
+                documents=[c["text"] for c in chunks],
+                ids=[c["id"] for c in chunks],
+                metadatas=[c["metadata"] for c in chunks]
+            )
+            print(f"  → {len(chunks)} chunks ingested")
+        print(f"\nVector store ready ({collection.count()} total chunks)\n")
+    else:
+        print(f"Loaded existing vector store ({collection.count()} chunks)")
 
-    print(f"\nVector store ready ({collection.count()} total chunks)\n")
     return collection
 
 # ---- STEP 4: Retrieve relevant chunks ----
