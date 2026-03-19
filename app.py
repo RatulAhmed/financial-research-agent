@@ -164,3 +164,4 @@ if question := st.chat_input("Ask about Nvidia, Apple, or Meta..."):
             "role": "assistant",
             "content": answer
         })
+        st.rerun()
