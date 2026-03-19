@@ -1,8 +1,5 @@
 import streamlit as st
 import os
-import tempfile
-import shutil
-import threading
 import time
 from dotenv import load_dotenv
 from agent import build_graph
@@ -51,93 +48,37 @@ st.set_page_config(
 st.title("📈 Financial Research Agent")
 st.caption("Intelligent document research agent with live market data")
 
+# ---- CONFIG ----
+PDF_PATHS = ["nvidia_10k.pdf", "apple_10k.pdf", "meta-10k.pdf"]
+COMPANIES = ["Nvidia", "Apple", "Meta"]
+
 # ---- SESSION STATE ----
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
-if "collection" not in st.session_state:
-    st.session_state.collection = None
 if "app" not in st.session_state:
     st.session_state.app = build_graph()
-if "uploaded_filenames" not in st.session_state:
-    st.session_state.uploaded_filenames = []
-if "temp_dir" not in st.session_state:
-    st.session_state.temp_dir = tempfile.mkdtemp()
-if "ingesting" not in st.session_state:
-    st.session_state.ingesting = False
-if "ingestion_complete" not in st.session_state:
-    st.session_state.ingestion_complete = False
-if "ingestion_error" not in st.session_state:
-    st.session_state.ingestion_error = None
-
-# ---- BACKGROUND INGESTION ----
-def run_ingestion(pdf_paths):
-    try:
-        collection = build_vector_store(pdf_paths)
-        st.session_state.collection = collection
-        st.session_state.ingestion_complete = True
-        st.session_state.ingesting = False
-    except Exception as e:
-        st.session_state.ingestion_error = str(e)
-        st.session_state.ingesting = False
+if "collection" not in st.session_state:
+    with st.spinner("Loading knowledge base..."):
+        st.session_state.collection = build_vector_store(PDF_PATHS)
 
 # ---- SIDEBAR ----
 with st.sidebar:
-    st.header("Documents")
-
-    uploaded_files = st.file_uploader(
-        "Drop PDFs here to analyze",
-        type="pdf",
-        accept_multiple_files=True
-    )
-
-    if uploaded_files:
-        new_filenames = sorted([f.name for f in uploaded_files])
-
-        if new_filenames != st.session_state.uploaded_filenames and not st.session_state.ingesting:
-            pdf_paths = []
-            for uploaded_file in uploaded_files:
-                temp_path = os.path.join(st.session_state.temp_dir, uploaded_file.name)
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                pdf_paths.append(temp_path)
-
-            st.session_state.uploaded_filenames = new_filenames
-            st.session_state.ingesting = True
-            st.session_state.ingestion_complete = False
-            st.session_state.ingestion_error = None
-            st.session_state.collection = None
-            st.session_state.messages = []
-            st.session_state.conversation_history = []
-
-            thread = threading.Thread(target=run_ingestion, args=(pdf_paths,))
-            thread.daemon = True
-            thread.start()
-
-    # Show ingestion status
-    if st.session_state.ingesting:
-        st.info("⏳ Ingesting documents... please wait")
-        time.sleep(3)
-        st.rerun()
-    elif st.session_state.ingestion_complete:
-        st.success(f"Ready — {len(st.session_state.uploaded_filenames)} document(s) loaded")
-        for filename in st.session_state.uploaded_filenames:
-            st.markdown(f"📄 `{filename}`")
-    elif st.session_state.ingestion_error:
-        st.error(f"Ingestion failed: {st.session_state.ingestion_error}")
-    else:
-        st.info("Upload one or more PDFs to get started")
+    st.header("Loaded Documents")
+    for company, path in zip(COMPANIES, PDF_PATHS):
+        st.markdown(f"📄 **{company}** 10-K")
 
     st.divider()
-    st.header("About")
+    st.header("Try asking...")
     st.markdown("""
-    This agent:
-    - Retrieves relevant chunks from your PDFs
-    - Evaluates retrieval quality and retries if needed
-    - Fetches live market data when relevant
-    - Cites sources for every answer
+    - What was Nvidia's revenue growth YoY?
+    - Compare Apple and Meta's risk factors
+    - What is Nvidia's current PE ratio?
+    - Where is Meta investing most heavily?
+    - Compare gross margins across all three companies
     """)
+
     st.divider()
     if st.button("Clear conversation"):
         st.session_state.messages = []
@@ -159,73 +100,67 @@ IMPORTANT RULES:
 - Be concise and signal focused in your final answer."""
 
 # ---- HANDLE INPUT ----
-if not st.session_state.ingestion_complete:
-    if st.session_state.ingesting:
-        st.warning("⏳ Documents are being processed, please wait...")
-    else:
-        st.warning("👈 Upload PDFs in the sidebar to get started")
-else:
-    if question := st.chat_input("Ask a question about your documents..."):
+if question := st.chat_input("Ask about Nvidia, Apple, or Meta..."):
 
-        with st.chat_message("user"):
-            st.markdown(question)
-        st.session_state.messages.append({"role": "user", "content": question})
-        st.session_state.conversation_history.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+    st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.conversation_history.append({"role": "user", "content": question})
 
-        with st.chat_message("assistant"):
-            status = st.status("Researching...", expanded=False)
+    with st.chat_message("assistant"):
+        status = st.status("Researching...", expanded=False)
 
-            initial_state = {
-                "messages": st.session_state.conversation_history.copy(),
-                "collection": st.session_state.collection,
-                "question": question,
-                "retrieved_chunks": [],
-                "retrieval_sufficient": False,
-                "reformulated_query": None,
-                "retry_count": 0,
-                "stop_reason": None
-            }
+        initial_state = {
+            "messages": st.session_state.conversation_history.copy(),
+            "collection": st.session_state.collection,
+            "question": question,
+            "retrieved_chunks": [],
+            "retrieval_sufficient": False,
+            "reformulated_query": None,
+            "retry_count": 0,
+            "stop_reason": None
+        }
 
-            with status:
-                st.write("🔍 Retrieving relevant documents...")
-                final_state = st.session_state.app.invoke(initial_state)
+        with status:
+            st.write("🔍 Retrieving relevant documents...")
+            final_state = st.session_state.app.invoke(initial_state)
 
-                if final_state.get("retry_count", 0) > 0:
-                    st.write(f"🔄 Refined retrieval {final_state['retry_count']} time(s)")
+            if final_state.get("retry_count", 0) > 0:
+                st.write(f"🔄 Refined retrieval {final_state['retry_count']} time(s)")
 
-                st.write("✅ Context ready — generating answer...")
+            st.write("✅ Context ready — generating answer...")
 
-            status.update(label="Research complete", state="complete")
+        status.update(label="Research complete", state="complete")
 
-            answer = None
-            last_message = final_state["messages"][-1]
-            if isinstance(last_message["content"], list):
-                for block in last_message["content"]:
-                    if hasattr(block, "text"):
-                        answer = block.text
-                        break
-            else:
-                answer = last_message["content"]
-
-            if answer:
-                def stream_text(text):
-                    chunk_size = 15
-                    for i in range(0, len(text), chunk_size):
-                        yield text[i:i + chunk_size]
-                        time.sleep(0.01)
-
-                st.write_stream(stream_text(answer))
-
-                if final_state.get("retrieved_chunks"):
-                    with st.expander("📚 Sources"):
-                        for chunk in final_state["retrieved_chunks"]:
-                            st.caption(f"**{chunk['source']}**, Page {chunk['page']}")
-                            st.text(chunk["text"][:300] + "...")
-                            st.divider()
+        answer = None
+        last_message = final_state["messages"][-1]
+        if isinstance(last_message["content"], list):
+            for block in last_message["content"]:
+                if hasattr(block, "text"):
+                    answer = block.text
+                    break
+        else:
+            answer = last_message["content"]
 
         if answer:
-            st.session_state.messages.append({"role": "assistant", "content": answer})
-            st.session_state.conversation_history.append({
-                "role": "assistant",
-                "content": answer
-            })
+            def stream_text(text):
+                chunk_size = 15
+                for i in range(0, len(text), chunk_size):
+                    yield text[i:i + chunk_size]
+                    time.sleep(0.01)
+
+            st.write_stream(stream_text(answer))
+
+            if final_state.get("retrieved_chunks"):
+                with st.expander("📚 Sources"):
+                    for chunk in final_state["retrieved_chunks"]:
+                        st.caption(f"**{chunk['source']}**, Page {chunk['page']}")
+                        st.text(chunk["text"][:300] + "...")
+                        st.divider()
+
+    if answer:
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.session_state.conversation_history.append({
+            "role": "assistant",
+            "content": answer
+        })
