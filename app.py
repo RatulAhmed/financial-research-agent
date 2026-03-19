@@ -16,8 +16,7 @@ def check_password():
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("RAG Financial Research Agent")
-        
+        st.title("Financial Research Agent")
         st.markdown("""
         An agentic RAG system for financial document research with live market data integration.
         
@@ -25,7 +24,7 @@ def check_password():
         """)
 
         st.link_button(
-            "📖 View README & Architecture on GitHub",
+            "View README & Architecture on GitHub",
             "https://github.com/yourusername/financial-research-agent"
         )
         
@@ -34,7 +33,7 @@ def check_password():
         st.markdown("**Demo Access**")
         password = st.text_input("Password", type="password")
         if st.button("Login"):
-            if password == st.secrets["APP_PASSWORD"]:
+            if password == os.environ.get("APP_PASSWORD"):
                 st.session_state.authenticated = True
                 st.rerun()
             else:
@@ -175,7 +174,7 @@ else:
             }
 
             with status:
-                st.write("🔍 Retrieving relevant documents...")
+                st.write("Retrieving relevant documents...")
                 final_state = st.session_state.app.invoke(initial_state)
                 # DEBUG
                 import json

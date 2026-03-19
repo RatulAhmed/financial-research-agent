@@ -13,3 +13,4 @@ wheels/
 .chromadb
 .DS_Store
 *.pdf
+.streamlit/
