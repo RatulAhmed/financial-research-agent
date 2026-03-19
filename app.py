@@ -2,8 +2,10 @@ import streamlit as st
 import os
 import tempfile
 import shutil
+import threading
+import time
 from dotenv import load_dotenv
-from agent import build_graph, AgentState
+from agent import build_graph
 from rag import build_vector_store
 import anthropic
 
@@ -22,14 +24,11 @@ def check_password():
         
         Built with Claude, LangGraph, ChromaDB, and Streamlit.
         """)
-
         st.link_button(
             "View README & Architecture on GitHub",
             "https://github.com/yourusername/financial-research-agent"
         )
-        
         st.divider()
-        
         st.markdown("**Demo Access**")
         password = st.text_input("Password", type="password")
         if st.button("Login"):
@@ -65,17 +64,23 @@ if "uploaded_filenames" not in st.session_state:
     st.session_state.uploaded_filenames = []
 if "temp_dir" not in st.session_state:
     st.session_state.temp_dir = tempfile.mkdtemp()
+if "ingesting" not in st.session_state:
+    st.session_state.ingesting = False
+if "ingestion_complete" not in st.session_state:
+    st.session_state.ingestion_complete = False
+if "ingestion_error" not in st.session_state:
+    st.session_state.ingestion_error = None
 
-# ---- STREAMING FINAL ANSWER ----
-def stream_final_answer(messages, system_prompt):
-    with client.messages.stream(
-        model="claude-sonnet-4-5",
-        max_tokens=4096,
-        system=system_prompt,
-        messages=messages
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+# ---- BACKGROUND INGESTION ----
+def run_ingestion(pdf_paths):
+    try:
+        collection = build_vector_store(pdf_paths)
+        st.session_state.collection = collection
+        st.session_state.ingestion_complete = True
+        st.session_state.ingesting = False
+    except Exception as e:
+        st.session_state.ingestion_error = str(e)
+        st.session_state.ingesting = False
 
 # ---- SIDEBAR ----
 with st.sidebar:
@@ -90,7 +95,7 @@ with st.sidebar:
     if uploaded_files:
         new_filenames = sorted([f.name for f in uploaded_files])
 
-        if new_filenames != st.session_state.uploaded_filenames:
+        if new_filenames != st.session_state.uploaded_filenames and not st.session_state.ingesting:
             pdf_paths = []
             for uploaded_file in uploaded_files:
                 temp_path = os.path.join(st.session_state.temp_dir, uploaded_file.name)
@@ -98,20 +103,29 @@ with st.sidebar:
                     f.write(uploaded_file.getbuffer())
                 pdf_paths.append(temp_path)
 
-            with st.spinner(f"Ingesting {len(pdf_paths)} document(s)..."):
-                if os.path.exists(".chromadb"):
-                    shutil.rmtree(".chromadb")
-                st.session_state.collection = build_vector_store(pdf_paths)
-                st.session_state.uploaded_filenames = new_filenames
-                st.session_state.messages = []
-                st.session_state.conversation_history = []
+            st.session_state.uploaded_filenames = new_filenames
+            st.session_state.ingesting = True
+            st.session_state.ingestion_complete = False
+            st.session_state.ingestion_error = None
+            st.session_state.collection = None
+            st.session_state.messages = []
+            st.session_state.conversation_history = []
 
-            st.success(f"Ready — {len(pdf_paths)} document(s) loaded")
+            thread = threading.Thread(target=run_ingestion, args=(pdf_paths,))
+            thread.daemon = True
+            thread.start()
 
-        st.divider()
+    # Show ingestion status
+    if st.session_state.ingesting:
+        st.info("⏳ Ingesting documents... please wait")
+        time.sleep(3)
+        st.rerun()
+    elif st.session_state.ingestion_complete:
+        st.success(f"Ready — {len(st.session_state.uploaded_filenames)} document(s) loaded")
         for filename in st.session_state.uploaded_filenames:
             st.markdown(f"📄 `{filename}`")
-
+    elif st.session_state.ingestion_error:
+        st.error(f"Ingestion failed: {st.session_state.ingestion_error}")
     else:
         st.info("Upload one or more PDFs to get started")
 
@@ -124,7 +138,6 @@ with st.sidebar:
     - Fetches live market data when relevant
     - Cites sources for every answer
     """)
-
     st.divider()
     if st.button("Clear conversation"):
         st.session_state.messages = []
@@ -146,8 +159,11 @@ IMPORTANT RULES:
 - Be concise and signal focused in your final answer."""
 
 # ---- HANDLE INPUT ----
-if st.session_state.collection is None:
-    st.warning("👈 Upload PDFs in the sidebar to get started")
+if not st.session_state.ingestion_complete:
+    if st.session_state.ingesting:
+        st.warning("⏳ Documents are being processed, please wait...")
+    else:
+        st.warning("👈 Upload PDFs in the sidebar to get started")
 else:
     if question := st.chat_input("Ask a question about your documents..."):
 
@@ -157,9 +173,6 @@ else:
         st.session_state.conversation_history.append({"role": "user", "content": question})
 
         with st.chat_message("assistant"):
-
-            # ---- PHASE 1: Run agent for retrieval and tool use ----
-            # Show status updates as agent works
             status = st.status("Researching...", expanded=False)
 
             initial_state = {
@@ -174,14 +187,9 @@ else:
             }
 
             with status:
-                st.write("Retrieving relevant documents...")
+                st.write("🔍 Retrieving relevant documents...")
                 final_state = st.session_state.app.invoke(initial_state)
-                # DEBUG
-                import json
-                last = final_state["messages"][-1]
-                print(f"DEBUG last message role: {last['role']}")
-                print(f"DEBUG last message content type: {type(last['content'])}")
-                print(f"DEBUG last message content: {last['content']}")
+
                 if final_state.get("retry_count", 0) > 0:
                     st.write(f"🔄 Refined retrieval {final_state['retry_count']} time(s)")
 
@@ -189,39 +197,31 @@ else:
 
             status.update(label="Research complete", state="complete")
 
-            # ---- PHASE 2: Stream the final answer ----
-            # Build messages up to but not including final answer
-            # so we can stream it fresh
-           # ---- PHASE 2: Extract and display answer ----
-        answer = None
-        last_message = final_state["messages"][-1]
+            answer = None
+            last_message = final_state["messages"][-1]
+            if isinstance(last_message["content"], list):
+                for block in last_message["content"]:
+                    if hasattr(block, "text"):
+                        answer = block.text
+                        break
+            else:
+                answer = last_message["content"]
 
-        if isinstance(last_message["content"], list):
-            for block in last_message["content"]:
-                if hasattr(block, "text"):
-                    answer = block.text
-                    break
-        else:
-            answer = last_message["content"]
+            if answer:
+                def stream_text(text):
+                    chunk_size = 15
+                    for i in range(0, len(text), chunk_size):
+                        yield text[i:i + chunk_size]
+                        time.sleep(0.01)
 
-        if answer:
-            # Simulate streaming by writing chunk by chunk
-            def stream_text(text):
-                import time
-                chunk_size = 15
-                for i in range(0, len(text), chunk_size):
-                    yield text[i:i + chunk_size]
-                    time.sleep(0.01)
+                st.write_stream(stream_text(answer))
 
-            st.write_stream(stream_text(answer))
-
-            # ---- SOURCES ----
-            if final_state.get("retrieved_chunks"):
-                with st.expander("📚 Sources"):
-                    for chunk in final_state["retrieved_chunks"]:
-                        st.caption(f"**{chunk['source']}**, Page {chunk['page']}")
-                        st.text(chunk["text"][:300] + "...")
-                        st.divider()
+                if final_state.get("retrieved_chunks"):
+                    with st.expander("📚 Sources"):
+                        for chunk in final_state["retrieved_chunks"]:
+                            st.caption(f"**{chunk['source']}**, Page {chunk['page']}")
+                            st.text(chunk["text"][:300] + "...")
+                            st.divider()
 
         if answer:
             st.session_state.messages.append({"role": "assistant", "content": answer})
