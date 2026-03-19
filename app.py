@@ -23,7 +23,7 @@ def check_password():
         """)
         st.link_button(
             "View README & Architecture on GitHub",
-            "https://github.com/yourusername/financial-research-agent"
+            "https://github.com/RatulAhmed/financial-research-agent"
         )
         st.divider()
         st.markdown("**Demo Access**")

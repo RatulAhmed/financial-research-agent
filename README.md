@@ -48,7 +48,7 @@ uv run streamlit run app.py
 
 The original implementation supported drag-and-drop PDF uploads so any document could be analyzed at runtime. This was removed in the deployed version due to server timeout constraints — embedding large PDFs (400+ pages) during a live request exceeds Railway's free tier limits. The upload feature works fine locally and the code for it lives in the `experiments` branch. The deployed version ships with Nvidia, Apple, and Meta 10-Ks pre-embedded into the Docker image at build time.
 
--- example .env
+## example .env
 ANTHROPIC_API_KEY=your-key-here
 APP_PASSWORD=your-password-here
 
